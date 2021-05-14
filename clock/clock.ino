@@ -1,5 +1,6 @@
 
 #include "SPI.h"
+#include <Adafruit_GFX.h>
 #include "Adafruit_SSD1306.h"
 #include <Wire.h>
 #include <RTClib.h>
@@ -8,13 +9,13 @@
 
 
 // If using software SPI (the default case):
-#define OLED_MOSI   9
-#define OLED_CLK   10
-#define OLED_DC    11
-#define OLED_CS    12
-#define OLED_RESET 13
+#define OLED_MOSI  P1_6
+#define OLED_CLK   P1_5
+#define OLED_DC    P3_7
+#define OLED_CS    P5_1
+#define OLED_RESET P3_5
 
-#define CLOCK_INTERRUPT_PIN 2
+#define CLOCK_INTERRUPT_PIN P2_3
 
 
 
@@ -27,6 +28,7 @@ String time_text = "H : m : s";
 boolean blink_toggle = false;
 boolean LED_blink_toggle = false;
 boolean isLEDBlinking = false;
+boolean needAdjust = false;
 int setting_mode = 0;
 int BlinkingCount = 0;
 
@@ -34,14 +36,8 @@ int BlinkingCount = 0;
 void setup() {
   if (! rtc.begin()) {
     Serial.println("Couldn't find RTC");
-    Serial.flush();
-    abort();
   }
-  if (rtc.lostPower()) {
-    Serial.println("RTC lost power, let's set the time!");
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-  }
-  
+  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   rtc.disable32K();
   
   rtc.clearAlarm(1);
@@ -49,24 +45,40 @@ void setup() {
   rtc.writeSqwPinMode(DS3231_OFF);
   rtc.disableAlarm(2);
 
-  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(GREEN_LED, OUTPUT);
   pinMode(CLOCK_INTERRUPT_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(CLOCK_INTERRUPT_PIN), SetAlarmBlink, FALLING);
   
+  pinMode(P1_1, INPUT_PULLUP);
+  pinMode(P1_4, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(P1_1), menuClick, FALLING);
+  attachInterrupt(digitalPinToInterrupt(P1_4), upClick, FALLING);
+
   OLED.begin(SSD1306_SWITCHCAPVCC,0xAA); // initialize with the  addr 0x3C 128x64)
   
-  Serial.begin(9600);
-  alarmtime = DateTime(2020, 1, 1, 23,32, 0);
+  Serial.begin(115200);
+  alarmtime = DateTime(2020, 1, 1, 14,12, 0);
   if(rtc.setAlarm1(alarmtime, DS3231_A1_Hour)){
     Serial.println("Alarm was set");
   }
-
+  
+  OLED.drawLine(0, 15, 127,15, WHITE);
+  OLED.display();
+  delay(1000);
   now = rtc.now();
   time_text = String(now.hour()) +  " : " + String(now.minute()) + " : " + String(now.second());
 }
 
 void loop(){
-
+  if (needAdjust || setting_mode == 5){
+    rtc.clearAlarm(1);
+    if(rtc.setAlarm1(alarmtime, DS3231_A1_Hour)){
+      Serial.println("Alarm was set");
+    }
+    rtc.adjust(now);
+    needAdjust = false;
+  }
+  
   if(setting_mode == 0)
   {
     now = rtc.now();
@@ -137,12 +149,53 @@ void loop(){
   
 }
 
+void menuClick(){
+      Serial.println(setting_mode);
+      setting_mode = (setting_mode + 1) % 6;
+      if(setting_mode == 0){ // turn back to clock mode
+        needAdjust = true;
+      }
+        
+      Serial.println(setting_mode);
+}
+
+void upClick(){
+      
+      if(setting_mode == 1){ // alarm hour setting
+          int new_hour = (alarmtime.hour() + 1)%24;
+          alarmtime = DateTime(2020, 1, 1, new_hour, alarmtime.minute(), 0);
+      }
+      else if (setting_mode == 2){ // alarm minute setting
+          int new_minute = (alarmtime.minute() + 1)%60;
+          alarmtime = DateTime(2020, 1, 1, alarmtime.hour(), new_minute, 0);
+      }
+
+      else if (setting_mode == 3){ // clock hour setting
+          int new_hour = (now.hour() + 1)%24;
+          now = DateTime(now.year(), now.month(), now.day(), new_hour, now.minute(), now.minute());
+      }
+      else if (setting_mode == 4){ // clock minute setting
+          int new_minute = (now.minute() + 1)%60;
+          now = DateTime(now.year(), now.month(), now.day(), now.hour(), new_minute, now.minute());
+      }
+      else if (setting_mode == 5){ // clock second setting
+          int new_second = (now.second() + 1)%60;
+          now = DateTime(now.year(), now.month(), now.day(), now.hour(), now.minute(), new_second);
+      }
+      
+}
+
 void show(){
   OLED.clearDisplay(); 
   OLED.setTextColor(WHITE);   //Text is white ,background is black
   OLED.setTextSize(1);
-  
+
   OLED.setCursor(0,0);
+  OLED.println(String(now.day()) +  "/" + String(now.month()) + "/" + String(now.year()));
+  
+
+  
+  OLED.setCursor(0,10);
   if(setting_mode == 0)
   {
      time_text = String(now.hour()) +  " : " + String(now.minute()) + " : " + String(now.second());
@@ -185,7 +238,7 @@ void show(){
 
   
   
-  OLED.drawLine(0, 15, 127,15, WHITE);
+  OLED.drawLine(0, 22, 127,22, WHITE);
 
 
   
@@ -239,12 +292,12 @@ void onAlarm(){
     OLED.setCursor(0,15);
     OLED.println("!!!  Wake up  !!!");
     OLED.display(); 
-    digitalWrite(LED_BUILTIN, HIGH) ; 
+    digitalWrite(GREEN_LED, HIGH) ; 
     delay(300);
     
     OLED.clearDisplay(); 
     OLED.display(); 
-    digitalWrite(LED_BUILTIN, LOW) ; 
+    digitalWrite(GREEN_LED, LOW) ; 
     delay(200);
     
   }
